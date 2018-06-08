@@ -20,6 +20,10 @@ solr-fstats
     solr-fstats -host [HOSTNAME OF YOUR SOLR INSTANCE] -core [YOUR SOLR CORE] > [OUTPUT STATISTICS DOCUMENT]
     ```
 
+### Note
+
+Currently, concrete fields that are included into a definition of a dynamic field are not part of the field statistics, i.e., only static fields will be evaluated right now.
+
 ## Requirements
 
 * [requests](http://docs.python-requests.org/en/master/)
