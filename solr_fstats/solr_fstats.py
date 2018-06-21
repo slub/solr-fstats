@@ -6,13 +6,15 @@ import json
 import sys
 
 import requests
-from sortedcontainers import SortedList
+from sortedcontainers import SortedSet
 
 FIELD_NAME = 'field_name'
 EXISTING = 'existing'
 EXISTING_PERCENTAGE = 'existing_percentage'
 NOTEXISTING = 'notexisting'
 NOTEXISTING_PERCENTAGE = 'notexisting_percentage'
+
+USED_FIELDS_DELIMITER = ','
 
 
 def get_header():
@@ -23,24 +25,23 @@ def get_header():
             NOTEXISTING_PERCENTAGE]
 
 
-def solr_request(request, host, port, core):
+def solr_request(core, host, port, request):
     response = requests.get(request)
-
     if response.status_code != 200:
         solr_instance = "http://{:s}:{:d}/solr/".format(host, port)
         raise RuntimeError('Solr core "%s" at solr instance "%s" is not available' % (core, solr_instance))
-
     response_body = response.content.decode('utf-8')
+    return response_body
 
-    return json.loads(response_body)
+
+def solr_request_json(request, host, port, core):
+    return json.loads(solr_request(core, host, port, request))
 
 
-def get_fields(host, port, core):
-    # permutations of dynamic fields are not included in this requests
-    # TODO: how to get them?
+def get_schema_fields(host, port, core):
     schema_request = "http://{:s}:{:d}/solr/{:s}/schema?wt=json".format(host, port, core)
 
-    schema = solr_request(schema_request, host, port, core)
+    schema = solr_request_json(schema_request, host, port, core)
 
     if "schema" not in schema and "fields" not in schema['schema']:
         raise RuntimeError('something went wrong, while requesting the schema from "%s", got response "%s"' % (
@@ -51,10 +52,34 @@ def get_fields(host, port, core):
     return [(field['name']) for field in fields]
 
 
+def get_used_fields(host, port, core):
+    used_fields_request = "http://{:s}:{:d}/solr/{:s}/select?q=*%3A*&wt=csv&rows=0".format(host, port, core)
+
+    used_fields_response = solr_request(core, host, port, used_fields_request)
+
+    lines = used_fields_response.splitlines()
+
+    if len(lines) != 1:
+        raise RuntimeError('something went wrong, while requesting the used fields from "%s", got response "%s"' % (
+            used_fields_request, used_fields_response))
+
+    used_fields = lines[0]
+
+    return used_fields.split(USED_FIELDS_DELIMITER)
+
+
+def get_fields(host, port, core):
+    schema_fields = get_schema_fields(host, port, core)
+    used_fields = get_used_fields(host, port, core)
+    fields = schema_fields + used_fields
+
+    return SortedSet(set(fields))
+
+
 def get_records_total(host, port, core):
     total_request = "http://{:s}:{:d}/solr/{:s}/select?q=*%3A*&rows=0&wt=json".format(host, port, core)
 
-    response_json = solr_request(total_request, host, port, core)
+    response_json = solr_request_json(total_request, host, port, core)
 
     if "response" not in response_json and "numFound" not in response_json['response']:
         raise RuntimeError(
@@ -69,7 +94,7 @@ def get_field_total(field, host, port, core):
                                                                                                              core,
                                                                                                              field)
 
-    response_json = solr_request(total_request, host, port, core)
+    response_json = solr_request_json(total_request, host, port, core)
 
     if "response" not in response_json and "numFound" not in response_json['response']:
         raise RuntimeError(
@@ -127,7 +152,7 @@ def run():
 
     args = parser.parse_args()
 
-    fields = SortedList(get_fields(args.host, args.port, args.core))
+    fields = get_fields(args.host, args.port, args.core)
     total = get_records_total(args.host, args.port, args.core)
 
     stats = [(get_all_field_statistics(field, args.host, args.port, args.core, total)) for field in fields]
