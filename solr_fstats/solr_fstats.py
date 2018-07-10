@@ -16,6 +16,8 @@ NOTEXISTING_PERCENTAGE = 'notexisting_percentage'
 
 USED_FIELDS_DELIMITER = ','
 
+HTTP_PREFIX = 'http'
+
 
 def get_header():
     return [FIELD_NAME,
@@ -25,23 +27,31 @@ def get_header():
             NOTEXISTING_PERCENTAGE]
 
 
-def solr_request(core, host, port, request):
+def format_solr_instance(host, port):
+    formatted_host = host
+    if not str(host).startswith(HTTP_PREFIX):
+        formatted_host = "{:s}://{:s}".format(HTTP_PREFIX, host)
+    if port:
+        return "{:s}:{:d}/solr/".format(formatted_host, port)
+    return "{:s}/solr/".format(formatted_host)
+
+
+def solr_request(core, base_uri, request):
     response = requests.get(request)
     if response.status_code != 200:
-        solr_instance = "http://{:s}:{:d}/solr/".format(host, port)
-        raise RuntimeError('Solr core "%s" at solr instance "%s" is not available' % (core, solr_instance))
+        raise RuntimeError('Solr core "%s" at solr instance "%s" is not available' % (core, base_uri))
     response_body = response.content.decode('utf-8')
     return response_body
 
 
-def solr_request_json(request, host, port, core):
-    return json.loads(solr_request(core, host, port, request))
+def solr_request_json(request, base_uri, core):
+    return json.loads(solr_request(core, base_uri, request))
 
 
-def get_schema_fields(host, port, core):
-    schema_request = "http://{:s}:{:d}/solr/{:s}/schema?wt=json".format(host, port, core)
+def get_schema_fields(base_uri, core):
+    schema_request = "{:s}{:s}/schema?wt=json".format(base_uri, core)
 
-    schema = solr_request_json(schema_request, host, port, core)
+    schema = solr_request_json(schema_request, base_uri, core)
 
     if "schema" not in schema and "fields" not in schema['schema']:
         raise RuntimeError('something went wrong, while requesting the schema from "%s", got response "%s"' % (
@@ -52,10 +62,10 @@ def get_schema_fields(host, port, core):
     return [(field['name']) for field in fields]
 
 
-def get_used_fields(host, port, core):
-    used_fields_request = "http://{:s}:{:d}/solr/{:s}/select?q=*%3A*&wt=csv&rows=0".format(host, port, core)
+def get_used_fields(base_uri, core):
+    used_fields_request = "{:s}{:s}/select?q=*%3A*&wt=csv&rows=0".format(base_uri, core)
 
-    used_fields_response = solr_request(core, host, port, used_fields_request)
+    used_fields_response = solr_request(core, base_uri, used_fields_request)
 
     lines = used_fields_response.splitlines()
 
@@ -68,18 +78,18 @@ def get_used_fields(host, port, core):
     return used_fields.split(USED_FIELDS_DELIMITER)
 
 
-def get_fields(host, port, core):
-    schema_fields = get_schema_fields(host, port, core)
-    used_fields = get_used_fields(host, port, core)
+def get_fields(base_uri, core):
+    schema_fields = get_schema_fields(base_uri, core)
+    used_fields = get_used_fields(base_uri, core)
     fields = schema_fields + used_fields
 
     return SortedSet(set(fields))
 
 
-def get_records_total(host, port, core):
-    total_request = "http://{:s}:{:d}/solr/{:s}/select?q=*%3A*&rows=0&wt=json".format(host, port, core)
+def get_records_total(base_uri, core):
+    total_request = "{:s}{:s}/select?q=*%3A*&rows=0&wt=json".format(base_uri, core)
 
-    response_json = solr_request_json(total_request, host, port, core)
+    response_json = solr_request_json(total_request, base_uri, core)
 
     if "response" not in response_json and "numFound" not in response_json['response']:
         raise RuntimeError(
@@ -89,12 +99,10 @@ def get_records_total(host, port, core):
     return response_json['response']['numFound']
 
 
-def get_field_total(field, host, port, core):
-    total_request = "http://{:s}:{:d}/solr/{:s}/select?q=*%3A*&fq={:s}%3A%5B*+TO+*%5D&rows=0&wt=json".format(host, port,
-                                                                                                             core,
-                                                                                                             field)
+def get_field_total(field, base_uri, core):
+    total_request = "{:s}{:s}/select?q=*%3A*&fq={:s}%3A%5B*+TO+*%5D&rows=0&wt=json".format(base_uri, core, field)
 
-    response_json = solr_request_json(total_request, host, port, core)
+    response_json = solr_request_json(total_request, base_uri, core)
 
     if "response" not in response_json and "numFound" not in response_json['response']:
         raise RuntimeError(
@@ -104,17 +112,17 @@ def get_field_total(field, host, port, core):
     return response_json['response']['numFound']
 
 
-def get_field_statistics(field, host, port, core, records_total):
-    field_total = get_field_total(field, host, port, core)
+def get_field_statistics(field, base_uri, core, records_total):
+    field_total = get_field_total(field, base_uri, core)
     field_total_percentage = (float(field_total) / float(records_total)) * 100
 
     return (field_total,
             "{0:.2f}".format(field_total_percentage))
 
 
-def get_all_field_statistics(field, host, port, core, records_total):
-    field_stats = get_field_statistics(field, host, port, core, records_total)
-    field_neg_stats = get_field_statistics("-{:s}".format(field), host, port, core, records_total)
+def get_all_field_statistics(field, base_uri, core, records_total):
+    field_stats = get_field_statistics(field, base_uri, core, records_total)
+    field_neg_stats = get_field_statistics("-{:s}".format(field), base_uri, core, records_total)
 
     return {FIELD_NAME: field,
             EXISTING: field_stats[0],
@@ -145,17 +153,17 @@ def run():
 
     optional_arguments.add_argument('-host', type=str, default='localhost',
                                     help='hostname or IP address of the Solr instance to use')
-    optional_arguments.add_argument('-port', type=int, default=8983,
-                                    help='port of the Solr instance to use')
+    optional_arguments.add_argument('-port', type=int, help='port of the Solr instance to use')
 
     parser._action_groups.append(optional_arguments)
 
     args = parser.parse_args()
+    solr_instance = format_solr_instance(args.host, args.port)
 
-    fields = get_fields(args.host, args.port, args.core)
-    total = get_records_total(args.host, args.port, args.core)
+    fields = get_fields(solr_instance, args.core)
+    total = get_records_total(solr_instance, args.core)
 
-    stats = [(get_all_field_statistics(field, args.host, args.port, args.core, total)) for field in fields]
+    stats = [(get_all_field_statistics(field, solr_instance, args.core, total)) for field in fields]
 
     csv_print(stats)
 
