@@ -37,9 +37,14 @@ def format_solr_instance(host, port):
 
 
 def solr_request(core, base_uri, request):
-    response = requests.get(request)
+    response = requests.get(request, timeout=60)
     if response.status_code != 200:
-        raise RuntimeError('Solr core "%s" at solr instance "%s" is not available' % (core, base_uri))
+        content = None
+        if response.content:
+            content = response.content.decode('utf-8')
+        raise RuntimeError(
+            'Solr core "%s" at solr instance "%s" is not available, i.e. could not execute request to "%s" successfully; got a "%d" ("%s")' % (
+            core, base_uri, request, response.status_code, content))
     response_body = response.content.decode('utf-8')
     return response_body
 
@@ -100,7 +105,7 @@ def get_records_total(base_uri, core):
 
 
 def get_field_total(field, base_uri, core):
-    total_request = "{:s}{:s}/select?q=*%3A*&fq={:s}%3A%5B*+TO+*%5D&rows=0&wt=json".format(base_uri, core, field)
+    total_request = "{:s}{:s}/select?q={:s}%3A*&rows=0&wt=json".format(base_uri, core, field)
 
     response_json = solr_request_json(total_request, base_uri, core)
 
