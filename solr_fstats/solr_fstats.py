@@ -58,7 +58,7 @@ def get_schema_fields(base_uri, core):
 
     schema = solr_request_json(schema_request, base_uri, core)
 
-    if "schema" not in schema and "fields" not in schema['schema']:
+    if "schema" not in schema or "fields" not in schema['schema']:
         raise RuntimeError('something went wrong, while requesting the schema from "%s", got response "%s"' % (
             schema_request, schema))
 
@@ -96,7 +96,7 @@ def get_records_total(base_uri, core):
 
     response_json = solr_request_json(total_request, base_uri, core)
 
-    if "response" not in response_json and "numFound" not in response_json['response']:
+    if "response" not in response_json or "numFound" not in response_json['response']:
         raise RuntimeError(
             'something went wrong, while requesting the total number of records from "%s", got response "%s"' % (
                 total_request, response_json))
@@ -109,7 +109,7 @@ def get_field_total(field, base_uri, core):
 
     response_json = solr_request_json(total_request, base_uri, core)
 
-    if "response" not in response_json and "numFound" not in response_json['response']:
+    if "response" not in response_json or "numFound" not in response_json['response']:
         raise RuntimeError(
             'something went wrong, while requesting the total number field "%s" existing in the records from "%s", got response "%s"' % (
                 field, total_request, response_json))
